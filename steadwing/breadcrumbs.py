@@ -12,6 +12,8 @@ _breadcrumbs: deque[dict[str, Any]] = deque(maxlen=100)
 _lock = threading.Lock()
 _original_http_request: Any = None
 _original_https_request: Any = None
+_original_http_getresponse: Any = None
+_original_https_getresponse: Any = None
 _patched = False
 _in_sdk_call = threading.local()
 
@@ -65,10 +67,10 @@ def _patched_request(original_fn: Any):
                     "duration_ms": round(duration_ms, 2),
                 },
             }
-            # Try to get status code from response
+            # Stash the breadcrumb on the connection so the matching
+            # getresponse() call can fill in the status code.
             try:
-                if hasattr(self, "getresponse"):
-                    pass  # status is captured after getresponse is called
+                self._steadwing_breadcrumb = breadcrumb
             except Exception:
                 pass
             add_breadcrumb(breadcrumb)
@@ -90,9 +92,29 @@ def _patched_request(original_fn: Any):
     return wrapper
 
 
+def _patched_getresponse(original_fn: Any):
+    """Create a patched getresponse that records the HTTP status code."""
+
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        response = original_fn(self, *args, **kwargs)
+        try:
+            breadcrumb = getattr(self, "_steadwing_breadcrumb", None)
+            if breadcrumb is not None:
+                status = getattr(response, "status", None)
+                if status is not None:
+                    breadcrumb["data"]["status_code"] = status
+                self._steadwing_breadcrumb = None
+        except Exception:
+            pass
+        return response
+
+    return wrapper
+
+
 def patch_http_client() -> None:
     """Monkey-patch http.client to capture outgoing HTTP requests as breadcrumbs."""
     global _original_http_request, _original_https_request, _patched
+    global _original_http_getresponse, _original_https_getresponse
 
     if _patched:
         return
@@ -100,10 +122,21 @@ def patch_http_client() -> None:
     try:
         _original_http_request = http.client.HTTPConnection.request
         http.client.HTTPConnection.request = _patched_request(_original_http_request)
+        _original_http_getresponse = http.client.HTTPConnection.getresponse
+        http.client.HTTPConnection.getresponse = _patched_getresponse(_original_http_getresponse)
 
-        if hasattr(http.client, "HTTPSConnection"):
-            _original_https_request = http.client.HTTPSConnection.request
-            http.client.HTTPSConnection.request = _patched_request(_original_https_request)
+        # HTTPSConnection normally inherits request/getresponse from HTTPConnection,
+        # so the patches above already cover HTTPS. Only patch it separately on the
+        # (rare) Python builds where it defines its own — patching inherited methods
+        # again would double-wrap and emit two breadcrumbs per HTTPS request.
+        https_conn = getattr(http.client, "HTTPSConnection", None)
+        if https_conn is not None:
+            if "request" in https_conn.__dict__:
+                _original_https_request = https_conn.request
+                https_conn.request = _patched_request(_original_https_request)
+            if "getresponse" in https_conn.__dict__:
+                _original_https_getresponse = https_conn.getresponse
+                https_conn.getresponse = _patched_getresponse(_original_https_getresponse)
 
         _patched = True
     except Exception:
@@ -113,6 +146,7 @@ def patch_http_client() -> None:
 def unpatch_http_client() -> None:
     """Restore original http.client methods."""
     global _original_http_request, _original_https_request, _patched
+    global _original_http_getresponse, _original_https_getresponse
 
     if not _patched:
         return
@@ -120,8 +154,16 @@ def unpatch_http_client() -> None:
     try:
         if _original_http_request is not None:
             http.client.HTTPConnection.request = _original_http_request
-        if _original_https_request is not None and hasattr(http.client, "HTTPSConnection"):
-            http.client.HTTPSConnection.request = _original_https_request
+        if _original_http_getresponse is not None:
+            http.client.HTTPConnection.getresponse = _original_http_getresponse
+
+        https_conn = getattr(http.client, "HTTPSConnection", None)
+        if https_conn is not None:
+            if _original_https_request is not None:
+                https_conn.request = _original_https_request
+            if _original_https_getresponse is not None:
+                https_conn.getresponse = _original_https_getresponse
+
         _patched = False
     except Exception:
         pass

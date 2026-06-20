@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import threading
@@ -33,7 +34,8 @@ class Transport:
         self._lock = threading.Lock()
         self._flush_event = threading.Event()
         self._shutdown = False
-        self._dedup_cache: dict[str, float] = {}
+        # dedup_key -> {"ts": float, "event": dict} (event ref lets us bump count)
+        self._dedup_cache: dict[str, dict[str, Any]] = {}
         self._dedup_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._http_client: httpx.Client | None = None
@@ -57,16 +59,27 @@ class Transport:
                 if "breadcrumbs" in event:
                     event["breadcrumbs"] = event["breadcrumbs"][-50:]
 
-            # Deduplication for exceptions (time-window based)
+            # Deduplication for exceptions (time-window based). Instead of
+            # silently dropping repeats of the same error in a tight loop, we
+            # send a single event carrying a `count` of how many times it fired.
             if event.get("type") == "exception":
                 dedup_key = self._get_dedup_key(event)
                 if dedup_key:
                     now = time.time()
                     with self._dedup_lock:
-                        last_seen = self._dedup_cache.get(dedup_key)
-                        if last_seen is not None and (now - last_seen) < DEDUP_WINDOW_SECONDS:
-                            return
-                        self._dedup_cache[dedup_key] = now
+                        entry = self._dedup_cache.get(dedup_key)
+                        if entry is not None and (now - entry["ts"]) < DEDUP_WINDOW_SECONDS:
+                            # Same error within the window: bump the count on the
+                            # original event if it's still buffered (not yet sent).
+                            original = entry["event"]
+                            with self._lock:
+                                if any(e is original for e in self._queue):
+                                    original["count"] = original.get("count", 1) + 1
+                                    return
+                            # Original already flushed — start a fresh window so
+                            # the next occurrence is sent as a new representative.
+                        event["count"] = 1
+                        self._dedup_cache[dedup_key] = {"ts": now, "event": event}
                         if len(self._dedup_cache) > DEDUP_CACHE_MAX_SIZE:
                             oldest_key = next(iter(self._dedup_cache))
                             del self._dedup_cache[oldest_key]
@@ -117,8 +130,6 @@ class Transport:
 
     def _flush(self) -> None:
         """Send all queued events to the backend."""
-        import gzip
-
         with self._lock:
             if not self._queue:
                 return

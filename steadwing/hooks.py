@@ -100,7 +100,9 @@ def _steadwing_excepthook(exc_type: type, exc_value: BaseException, exc_tb: Any)
     try:
         if _on_exception_callback is not None:
             event_data = build_exception_event(exc_type, exc_value, exc_tb)
-            _on_exception_callback(event_data)
+            # Uncaught exception → process is about to die. Flush synchronously
+            # so startup/boot crashes still reach the backend.
+            _on_exception_callback(event_data, flush=True)
     except Exception:
         pass
 
@@ -120,7 +122,8 @@ def _patched_thread_run(self: threading.Thread) -> None:
                 exc_type, exc_value, exc_tb = sys.exc_info()
                 if exc_type is not None:
                     event_data = build_exception_event(exc_type, exc_value, exc_tb)
-                    _on_exception_callback(event_data)
+                    # Thread is dying from this exception — flush before re-raise.
+                    _on_exception_callback(event_data, flush=True)
         except Exception:
             pass
         raise

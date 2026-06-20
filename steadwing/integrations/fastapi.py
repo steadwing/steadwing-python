@@ -42,6 +42,8 @@ def patch_fastapi(on_exception: Any) -> None:
                         "method": request.method,
                         "url_path": str(request.url.path),
                         "query_string": str(request.url.query) if request.url.query else None,
+                        # An unhandled exception in the route results in a 500.
+                        "status_code": 500,
                         "duration_ms": round(duration_ms, 2),
                         "headers": scrub(dict(request.headers)),
                     }

@@ -10,6 +10,7 @@ from typing import Any
 
 from steadwing.breadcrumbs import patch_http_client
 from steadwing.hooks import patch_hooks
+from steadwing.integrations.asyncio_hook import patch_asyncio
 from steadwing.logging_handler import install_logging_handler
 from steadwing.transport import Transport
 from steadwing.types import base_event, build_runtime_info
@@ -58,6 +59,9 @@ class SteadwingClient:
 
         # Patch http.client for breadcrumbs
         patch_http_client()
+
+        # Capture unhandled errors from asyncio tasks / event loop
+        patch_asyncio(on_exception=self._handle_exception)
 
         # Auto-detect and patch supported frameworks
         self._try_patch_frameworks()
@@ -134,8 +138,14 @@ class SteadwingClient:
         except Exception:
             pass
 
-    def _handle_exception(self, event_data: dict[str, Any]) -> None:
-        """Handle a captured exception event."""
+    def _handle_exception(self, event_data: dict[str, Any], flush: bool = False) -> None:
+        """Handle a captured exception event.
+
+        Args:
+            event_data: The exception event payload.
+            flush: If True (uncaught/thread/async errors that kill the process),
+                flush the transport synchronously so the event isn't lost.
+        """
         if not self.enabled or self._transport is None:
             return
 
@@ -143,6 +153,8 @@ class SteadwingClient:
             event = base_event("exception", self.service, self.environment, self.runtime)
             event.update(event_data)
             self._transport.enqueue(event)
+            if flush:
+                self._transport.flush_sync()
         except Exception:
             pass
 
