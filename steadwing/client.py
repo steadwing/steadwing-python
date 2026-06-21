@@ -29,12 +29,12 @@ class SteadwingClient:
         self,
         api_key: str,
         service: str,
-        environment: str = "PROD",
+        env: str = "PROD",
         enabled: bool = True,
     ):
         self.api_key = api_key
         self.service = service
-        self.environment = environment
+        self.env = env
         self.enabled = enabled
         self.backend_url = os.environ.get("STEADWING_BACKEND_URL", _DEFAULT_BACKEND_URL)
         self.runtime = build_runtime_info()
@@ -150,7 +150,7 @@ class SteadwingClient:
             return
 
         try:
-            event = base_event("exception", self.service, self.environment, self.runtime)
+            event = base_event("exception", self.service, self.env, self.runtime)
             event.update(event_data)
             self._transport.enqueue(event)
             if flush:
@@ -164,7 +164,7 @@ class SteadwingClient:
             return
 
         try:
-            event = base_event("log", self.service, self.environment, self.runtime)
+            event = base_event("log", self.service, self.env, self.runtime)
             event.update(log_data)
             self._transport.enqueue(event)
         except Exception:
@@ -179,7 +179,7 @@ class SteadwingClient:
             if self._shutdown:
                 return
             try:
-                event = base_event("heartbeat", self.service, self.environment, self.runtime)
+                event = base_event("heartbeat", self.service, self.env, self.runtime)
                 event["status"] = "healthy"
                 if self._transport is not None:
                     self._transport.enqueue(event)

@@ -11,7 +11,7 @@ __version__ = SDK_VERSION
 def init(
     api_key: str,
     service: str,
-    environment: str = "PROD",
+    env: str = "PROD",
     enabled: bool = True,
 ) -> SteadwingClient:
     """Initialize the Steadwing SDK.
@@ -22,7 +22,7 @@ def init(
     Args:
         api_key: Your Steadwing API key (e.g. "st_...").
         service: Name of your service (e.g. "payment-service").
-        environment: Deployment environment (e.g. "PROD", "DEV").
+        env: Deployment environment (e.g. "PROD", "DEV").
         enabled: Whether to enable capture (default True). Set False to disable.
 
     Returns:
@@ -35,7 +35,7 @@ def init(
     client = SteadwingClient(
         api_key=api_key,
         service=service,
-        environment=environment,
+        env=env,
         enabled=enabled,
     )
     SteadwingClient.set_instance(client)

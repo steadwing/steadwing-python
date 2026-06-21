@@ -54,14 +54,14 @@ def build_runtime_info() -> dict[str, Any]:
 def base_event(
     event_type: str,
     service: str,
-    environment: str,
+    env: str,
     runtime: dict[str, Any],
 ) -> dict[str, Any]:
     """Create a base event dict with common fields."""
     return {
         "type": event_type,
         "service": service,
-        "environment": environment,
+        "env": env,
         "timestamp": time.time(),
         "sdk_version": SDK_VERSION,
         "runtime": runtime,

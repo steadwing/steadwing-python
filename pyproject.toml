@@ -5,23 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "steadwing"
 version = "0.1.0"
-description = "Steadwing Python SDK — auto-captures exceptions, error logs, and HTTP breadcrumbs"
+description = "Steadwing Python SDK — auto-captures exceptions, error logs and HTTP breadcrumbs"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
-    "httpx>=0.24.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "respx>=0.20",
+    "httpx>=0.28.1",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["steadwing"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
