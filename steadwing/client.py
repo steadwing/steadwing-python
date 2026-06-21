@@ -29,7 +29,7 @@ class SteadwingClient:
         self,
         api_key: str,
         service: str,
-        environment: str = "production",
+        environment: str = "PROD",
         enabled: bool = True,
     ):
         self.api_key = api_key
