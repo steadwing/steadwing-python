@@ -10,7 +10,7 @@ __version__ = SDK_VERSION
 
 def init(
     api_key: str,
-    service: str,
+    service: str = "default",
     env: str = "PROD",
     enabled: bool = True,
 ) -> SteadwingClient:

@@ -28,7 +28,7 @@ class SteadwingClient:
     def __init__(
         self,
         api_key: str,
-        service: str,
+        service: str = "default",
         env: str = "PROD",
         enabled: bool = True,
     ):
