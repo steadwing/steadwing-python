@@ -45,22 +45,20 @@ That's it. Steadwing is now capturing errors in your application.
 ```python
 steadwing.init(
     api_key="st_...",           # Required: your API key
-    service="my-service",       # Service name for grouping
-    environment="production",   # Deployment environment
+    service="my-service",       # Service name for grouping (default: "default")
+    env="PROD",                 # Deployment environment (default: "PROD")
     enabled=True,               # Set False to disable
-    backend_url="https://...",  # Override backend URL
 )
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_key` | `str` | - | Your Steadwing API key (required) |
-| `service` | `str` | `None` | Service name for grouping errors |
-| `environment` | `str` | `"production"` | Deployment environment label |
+| `service` | `str` | `"default"` | Service name for grouping errors |
+| `env` | `str` | `"PROD"` | Deployment environment (`"PROD"`, `"DEV"`, etc.) |
 | `enabled` | `bool` | `True` | Toggle SDK on/off |
-| `backend_url` | `str` | `None` | Override the default backend URL |
 
-> The backend URL can also be set via the `STEADWING_BACKEND_URL` environment variable.
+> The backend URL can be set via the `STEADWING_BACKEND_URL` environment variable.
 
 ## Usage
 
