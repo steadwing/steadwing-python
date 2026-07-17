@@ -41,6 +41,7 @@ class SteadwingClient:
         self._transport: Transport | None = None
         self._heartbeat_timer: threading.Timer | None = None
         self._shutdown = False
+        self._prev_sigterm: Any = None
 
         if self.enabled:
             self._setup()
@@ -69,12 +70,39 @@ class SteadwingClient:
         # Start heartbeat
         self._start_heartbeat()
 
-        # Register shutdown handlers (atexit + SIGTERM for containers)
+        # Register shutdown handlers (atexit + SIGTERM for containers).
         atexit.register(self._atexit_handler)
         try:
-            signal.signal(signal.SIGTERM, lambda *_: self._atexit_handler())
+            # signal.signal() REPLACES any existing handler, so capture the
+            # previous one and chain to it — otherwise we'd break the app's own
+            # graceful shutdown. And because installing a handler suppresses the
+            # default terminate action, we must restore it ourselves or the
+            # container hangs until it is force-killed.
+            self._prev_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, self._handle_sigterm)
         except (OSError, ValueError):
+            # Not on the main thread (or unsupported) — signals unavailable here.
             pass
+
+    def _handle_sigterm(self, signum: int, frame: Any) -> None:
+        """Flush on SIGTERM, then preserve the app's / default termination."""
+        self._atexit_handler()
+
+        prev = self._prev_sigterm
+        if callable(prev):
+            # App (or another library) had its own handler — let it run.
+            prev(signum, frame)
+        elif prev == signal.SIG_IGN:
+            # App explicitly chose to ignore SIGTERM — respect that.
+            return
+        else:
+            # Default (SIG_DFL) or None: restore default and re-raise so the
+            # process actually terminates instead of hanging.
+            try:
+                signal.signal(signal.SIGTERM, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+            except (OSError, ValueError):
+                pass
 
     def _try_patch_frameworks(self) -> None:
         """Auto-detect and patch supported frameworks and DB libraries."""
@@ -202,6 +230,12 @@ class SteadwingClient:
             self._heartbeat_timer.cancel()
         if self._transport is not None:
             self._transport.shutdown()
+
+    def get_health(self) -> dict[str, Any] | None:
+        """Delivery health snapshot for diagnostics, or None if no transport."""
+        if self._transport is None:
+            return None
+        return self._transport.get_health()
 
     @classmethod
     def get_instance(cls) -> SteadwingClient | None:

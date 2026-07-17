@@ -8,7 +8,7 @@ import subprocess
 import time
 from typing import Any
 
-SDK_VERSION = "0.1.0"
+SDK_VERSION = "0.1.3"
 
 
 def _get_git_sha() -> str | None:

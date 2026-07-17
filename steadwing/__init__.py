@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from steadwing.client import SteadwingClient
 from steadwing.types import SDK_VERSION
 
@@ -40,3 +42,16 @@ def init(
     )
     SteadwingClient.set_instance(client)
     return client
+
+
+def get_health() -> dict[str, Any] | None:
+    """Current delivery health snapshot.
+
+    Lets an app verify events are actually reaching Steadwing instead of
+    silently failing (bad key, backend down, etc.). Returns None if the SDK
+    has not been initialized.
+    """
+    client = SteadwingClient.get_instance()
+    if client is None:
+        return None
+    return client.get_health()

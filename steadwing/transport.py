@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import sys
 import threading
 import time
 from typing import Any
@@ -39,6 +40,15 @@ class Transport:
         self._dedup_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._http_client: httpx.Client | None = None
+
+        # Delivery health / diagnostics.
+        self._auth_failed = False
+        self._auth_warned = False
+        self._had_success = False
+        self._last_status_code: int | None = None
+        self._last_error: str | None = None
+        self._events_sent = 0
+        self._events_dropped = 0
 
     def start(self) -> None:
         """Start the background transport thread."""
@@ -86,6 +96,7 @@ class Transport:
 
             with self._lock:
                 if len(self._queue) >= MAX_QUEUE_SIZE:
+                    self._events_dropped += 1
                     return
                 self._queue.append(event)
                 if len(self._queue) >= FLUSH_BATCH_SIZE:
@@ -129,29 +140,90 @@ class Transport:
         return self._http_client
 
     def _flush(self) -> None:
-        """Send all queued events to the backend."""
+        """Send queued events, inspecting the response so failures aren't lost.
+
+        A rejected key stops delivery (warned once), permanent client errors
+        drop the batch, and transient failures (429/5xx/network) are put back on
+        the queue to retry on the next flush cycle.
+        """
+        if self._auth_failed:
+            # Known-bad key — drain so memory stays bounded, skip pointless calls.
+            with self._lock:
+                self._events_dropped += len(self._queue)
+                self._queue.clear()
+            return
+
         with self._lock:
             if not self._queue:
                 return
             batch = self._queue[:]
             self._queue.clear()
 
+        status: int | None = None
+        error: str | None = None
         try:
             mark_sdk_call()
             payload = json.dumps({"events": batch}, default=str).encode("utf-8")
             compressed = gzip.compress(payload, compresslevel=6)
-            self._get_client().post(
-                f"{self._backend_url}/api/ingest",
-                content=compressed,
-            )
-        except Exception:
-            pass
+            status = self._get_client().post(f"{self._backend_url}/api/ingest", content=compressed).status_code
+        except Exception as exc:  # network error / timeout / etc.
+            error = f"{type(exc).__name__}: {exc}"
         finally:
             unmark_sdk_call()
 
+        if status is not None and 200 <= status < 300:
+            self._had_success = True
+            self._events_sent += len(batch)
+            self._last_status_code = status
+            self._last_error = None
+        elif status in (401, 403):
+            self._auth_failed = True
+            self._last_status_code = status
+            self._last_error = f"authentication rejected (HTTP {status})"
+            self._events_dropped += len(batch)
+            if not self._auth_warned:
+                self._auth_warned = True
+                print(
+                    f"[steadwing] API key rejected (HTTP {status}). Events will NOT be "
+                    f"delivered. Check your Steadwing API key.",
+                    file=sys.stderr,
+                )
+        elif status is not None and 400 <= status < 500 and status != 429:
+            # Other 4xx won't be fixed by retrying this payload — drop it.
+            self._last_status_code = status
+            self._last_error = f"HTTP {status}"
+            self._events_dropped += len(batch)
+        else:
+            # Transient: 429, 5xx, or a network exception — retain and retry.
+            self._last_status_code = status
+            self._last_error = error or (f"HTTP {status}" if status else "unknown error")
+            with self._lock:
+                self._queue = (batch + self._queue)[:MAX_QUEUE_SIZE]
+
     def flush_sync(self) -> None:
-        """Synchronously flush remaining events. Called on shutdown."""
+        """Synchronously flush remaining events. Called on shutdown / fatal paths."""
         self._flush()
+
+    def get_health(self) -> dict[str, Any]:
+        """Snapshot of delivery health for diagnostics."""
+        with self._lock:
+            queued = len(self._queue)
+        if self._auth_failed:
+            status = "unauthorized"
+        elif not self._had_success and self._last_error is None:
+            status = "never_sent"
+        elif self._last_error is not None:
+            status = "degraded"
+        else:
+            status = "ok"
+        return {
+            "status": status,
+            "last_status_code": self._last_status_code,
+            "last_error": self._last_error,
+            "events_sent": self._events_sent,
+            "events_dropped": self._events_dropped,
+            "queued": queued,
+        }
 
     def shutdown(self) -> None:
         """Stop the transport thread and flush remaining events."""
