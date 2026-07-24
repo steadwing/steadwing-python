@@ -19,7 +19,7 @@ The Steadwing Python SDK auto-instruments your application to capture exceptions
 - Automatic exception capture (including threads and async)
 - `logging.error()` / `logging.critical()` forwarding
 - HTTP request breadcrumbs for debugging context
-- Built-in data scrubbing for sensitive fields
+- Built-in data scrubbing for sensitive request header and variable fields
 - Framework integrations for FastAPI, Django, Flask, and more
 
 ## Installation
@@ -70,27 +70,6 @@ Once initialized, Steadwing automatically captures:
 - **Error logs**: `logging.error()` and `logging.critical()` calls
 - **Breadcrumbs**: outgoing HTTP requests, log messages (rolling buffer of last 100)
 
-### Manual Capture
-
-```python
-import steadwing
-
-# Capture a specific exception
-try:
-    risky_operation()
-except Exception as e:
-    steadwing.capture_exception(e)
-
-# Capture the current exception (in an except block)
-try:
-    risky_operation()
-except Exception:
-    steadwing.capture_exception()
-
-# Capture a message
-steadwing.capture_message("Deployment completed", level="info")
-```
-
 ## Integrations
 
 Steadwing provides first-class support for popular Python frameworks:
@@ -107,9 +86,11 @@ Integrations are automatically activated when the corresponding library is detec
 
 ## Data Scrubbing
 
-Sensitive data is automatically scrubbed from captured events. Keys matching the following patterns (case-insensitive) have their values replaced with `[REDACTED]`:
+Built-in redaction covers selected structured fields. For supported framework integrations (FastAPI, Django, Flask), the SDK replaces values whose exact field name matches the list below (case-insensitive) in captured request headers. Traceback-local variable names are also checked against this list.
 
 `password` · `passwd` · `secret` · `api_key` · `apikey` · `token` · `auth` · `authorization` · `cookie` · `csrf` · `session` · `credit_card` · `ssn`
+
+Redaction does **not** scan free-text logs, exception messages, stack traces, URLs or query strings, SQL, or values embedded inside strings. If your application may include sensitive data in these contexts, implement additional scrubbing at the application level before the data reaches Steadwing.
 
 ## Contributing
 
